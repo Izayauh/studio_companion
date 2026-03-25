@@ -12,6 +12,7 @@ import re
 import random
 from music21 import harmony
 from midiutil import MIDIFile
+from comping_engine import PATTERNS, render_comping_block
 
 
 def normalize_chord(name):
@@ -133,10 +134,19 @@ def generate_midi(input_source, output_path="output_loop.mid", default_bpm=120):
 
     chords = data.get("chords", [])
     bpm = data.get("bpm", default_bpm)
+    rhythm = data.get("rhythm", "neo_soul_push")
+    swing = data.get("swing", 58.0)
 
     if not chords:
         print("No chords found in input.")
         return None
+
+    # Resolve comping pattern
+    pattern = PATTERNS.get(rhythm)
+    if pattern is None:
+        print(f"  Unknown rhythm '{rhythm}', using neo_soul_push.")
+        print(f"  Options: {', '.join(PATTERNS.keys())}")
+        pattern = PATTERNS["neo_soul_push"]
 
     # --- Build MIDI ---
     midi = MIDIFile(1)
@@ -164,14 +174,19 @@ def generate_midi(input_source, output_path="output_loop.mid", default_bpm=120):
 
         bass, upper = voice_chord(cs, prev_upper)
 
-        # Bass note — slightly louder
-        bass_vel = random.randint(90, 105)
-        midi.addNote(track, channel, bass, beat, bar_length, bass_vel)
-
-        # Upper voicing — subtle velocity variation for feel
-        for note in upper:
-            vel = random.randint(85, 100)
-            midi.addNote(track, channel, note, beat, bar_length, vel)
+        # Feed pitches to the comping engine
+        all_pitches = [bass] + upper
+        render_comping_block(
+            midi_object=midi,
+            track=track,
+            channel=channel,
+            start_measure_time=beat,
+            bpm=bpm,
+            chord_pitches=all_pitches,
+            pattern=pattern,
+            swing_percent=swing,
+            base_velocity=85,
+        )
 
         prev_upper = upper
         beat += bar_length
@@ -180,7 +195,8 @@ def generate_midi(input_source, output_path="output_loop.mid", default_bpm=120):
     with open(output_path, "wb") as f:
         midi.writeFile(f)
 
-    print(f"Done: {output_path}  |  {len(chords)} chords  |  {bpm} BPM")
+    rhythm_label = pattern.name
+    print(f"Done: {output_path}  |  {len(chords)} chords  |  {bpm} BPM  |  {rhythm_label}  |  swing {swing}%")
     return output_path
 
 
