@@ -69,20 +69,20 @@ PATTERNS = {
         name="syncopated",
         length_in_beats=4.0,
         hits=[
-            # Bass on beat 1
-            CompingHit(0.0, 1.75, 1.1, "bass"),
-            # Bass on beat 3
-            CompingHit(2.0, 1.75, 0.9, "bass"),
-            # Chord stab on &-of-1
-            CompingHit(0.5, 0.5, 0.75, "chord"),
-            # Chord on beat 2, staccato
-            CompingHit(1.0, 0.4, 0.85, "chord"),
-            # Ghost on &-of-2
-            CompingHit(1.75, 0.25, 0.4, "chord"),
-            # Chord on &-of-3, emphasis
-            CompingHit(2.5, 0.75, 1.0, "chord"),
-            # Ghost on &-of-4
-            CompingHit(3.5, 0.5, 0.5, "chord"),
+            # Bass on beat 1, short punch
+            CompingHit(0.0, 1.0, 1.15, "bass"),
+            # Bass on &-of-3, off-grid anchor
+            CompingHit(2.75, 1.25, 0.85, "bass"),
+            # Chord — skip beat 1, hit the &-of-1 (immediate off-beat)
+            CompingHit(0.5, 0.25, 0.7, "chord"),
+            # Ghost on beat-2-and (16th note territory)
+            CompingHit(1.75, 0.25, 0.35, "chord"),
+            # Staccato stab on &-of-2
+            CompingHit(2.5, 0.25, 0.9, "chord"),
+            # Main accent — beat 3 anticipation
+            CompingHit(2.75, 0.5, 1.05, "chord"),
+            # Quick ghost flick at end of bar
+            CompingHit(3.75, 0.25, 0.4, "chord"),
         ],
     ),
 
@@ -93,9 +93,9 @@ PATTERNS = {
             # Bass sustains full bar
             CompingHit(0.0, 4.0, 1.0, "bass"),
             # Chord enters gently on beat 1, long sustain
-            CompingHit(0.0, 3.0, 0.75, "chord"),
-            # Soft chord re-articulation on beat 3
-            CompingHit(3.0, 1.0, 0.55, "chord"),
+            CompingHit(0.0, 2.5, 0.75, "chord"),
+            # Soft re-voice on &-of-3 — gentle anticipation into next bar
+            CompingHit(2.5, 1.5, 0.5, "chord"),
         ],
     ),
 }
@@ -222,12 +222,16 @@ def render_comping_block(midi_object, track: int, channel: int,
                          start_measure_time: float, bpm: float,
                          chord_pitches: List[int], pattern: CompingPattern,
                          swing_percent: float = 58.0,
-                         base_velocity: int = 85) -> None:
+                         base_velocity: int = 85,
+                         total_duration: float = 0.0) -> None:
     """
     Translates a static pitch array into a humanized, rhythmic performance.
 
     Pipeline per hit:
       voice separation → swing → chord rolling → velocity humanization → addNote
+
+    total_duration: if > 0, clips all notes so nothing exceeds this beat
+                    (prevents MIDI extending past the loop boundary)
     """
     if not chord_pitches:
         return
@@ -239,8 +243,9 @@ def render_comping_block(midi_object, track: int, channel: int,
     for hit in pattern.hits:
         hit_global_time = start_measure_time + hit.beat_offset
 
-        # Apply swing
-        swung_time = apply_swing(hit_global_time, swing_percent, swing_grid=0.25)
+        # Apply swing on 8th-note grid so off-beats (0.5, 1.5, 2.5, 3.5)
+        # actually get delayed — 16th grid missed all pattern hits
+        swung_time = apply_swing(hit_global_time, swing_percent, swing_grid=0.5)
 
         # Determine which pitches this hit triggers
         if hit.voice_group == "bass":
@@ -276,6 +281,14 @@ def render_comping_block(midi_object, track: int, channel: int,
             )
 
             final_time = rolled_times[i]
+
+            # Clip note so it doesn't exceed the loop boundary
+            if total_duration > 0:
+                max_end = total_duration
+                if final_time >= max_end:
+                    continue  # note starts past the boundary, skip it
+                if final_time + final_duration > max_end:
+                    final_duration = max_end - final_time
 
             midi_object.addNote(
                 track=track,

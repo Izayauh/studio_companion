@@ -156,6 +156,7 @@ def generate_midi(input_source, output_path="output_loop.mid", default_bpm=120):
 
     beat = 0
     bar_length = 4  # 4/4 time, one chord per bar
+    total_beats = len(chords) * bar_length  # total loop length
     prev_upper = None
 
     for chord_name in chords:
@@ -186,6 +187,7 @@ def generate_midi(input_source, output_path="output_loop.mid", default_bpm=120):
             pattern=pattern,
             swing_percent=swing,
             base_velocity=85,
+            total_duration=total_beats,
         )
 
         prev_upper = upper
