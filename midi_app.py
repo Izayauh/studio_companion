@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 import re
+import subprocess
 from pathlib import Path
 from chord_to_midi import normalize_chord, voice_chord, generate_midi
 
@@ -144,20 +145,32 @@ st.markdown("""
     /* ── Download button ── */
     .stDownloadButton > button {
         width: 100%;
+        background: #1a1a2e !important;
+        color: #8a8aaa !important;
+        border: 1px solid #2a2a4a !important;
+        border-radius: 14px !important;
+        padding: 0.85rem 2rem !important;
+        font-size: 0.85rem !important;
+        font-weight: 600 !important;
+        letter-spacing: 1px !important;
+        text-transform: uppercase !important;
+    }
+    .stDownloadButton > button:hover {
+        background: #222240 !important;
+        border-color: #3a3a5a !important;
+        color: #c0c0d0 !important;
+    }
+
+    /* ── Open Folder button (primary action) ── */
+    button[data-testid="stBaseButton-secondary"][kind="secondary"] {
         background: linear-gradient(135deg, #1e8a4a 0%, #22a854 100%) !important;
         color: white !important;
         border: none !important;
         border-radius: 14px !important;
-        padding: 0.85rem 2rem !important;
-        font-size: 1rem !important;
         font-weight: 700 !important;
-        letter-spacing: 2px !important;
+        letter-spacing: 1px !important;
         text-transform: uppercase !important;
         box-shadow: 0 4px 20px rgba(30, 138, 74, 0.4) !important;
-    }
-    .stDownloadButton > button:hover {
-        background: linear-gradient(135deg, #25a058 0%, #2bc066 100%) !important;
-        box-shadow: 0 6px 30px rgba(30, 138, 74, 0.6) !important;
     }
 
     /* ── Chord validation chips ── */
@@ -259,6 +272,41 @@ OUTPUT_DIR = Path(__file__).parent / "midi_output"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 
+def build_filename(chords: list[str], bpm: int, rhythm: str) -> str:
+    """
+    Auto-generate a descriptive filename from the chord progression.
+    Example: Fm9-Dbmaj7-Eb6-C7b9_72bpm_neosoulpush.mid
+    If > 6 chords, truncates with count: Fm9-Dbmaj7-+4more_72bpm_neosoulpush.mid
+    """
+    max_chords_in_name = 6
+
+    # Clean chord names for filesystem safety
+    safe = [re.sub(r'[^\w#\-]', '', c) for c in chords]
+
+    if len(safe) <= max_chords_in_name:
+        chord_part = "-".join(safe)
+    else:
+        shown = safe[:2]
+        remaining = len(safe) - 2
+        chord_part = f"{'-'.join(shown)}-plus{remaining}more"
+
+    rhythm_clean = rhythm.replace("_", "")
+    name = f"{chord_part}_{bpm}bpm_{rhythm_clean}.mid"
+
+    # If file already exists, add a counter
+    path = OUTPUT_DIR / name
+    if path.exists():
+        counter = 2
+        while True:
+            numbered = f"{chord_part}_{bpm}bpm_{rhythm_clean}_{counter}.mid"
+            if not (OUTPUT_DIR / numbered).exists():
+                name = numbered
+                break
+            counter += 1
+
+    return name
+
+
 # ─── App UI ──────────────────────────────────────────────────────
 
 st.markdown('<div class="main-card">', unsafe_allow_html=True)
@@ -325,7 +373,7 @@ if st.button("Generate MIDI", use_container_width=True):
     elif not all_valid:
         st.error("Fix the highlighted chords before generating.")
     else:
-        output_filename = "output_loop.mid"
+        output_filename = build_filename(chords, bpm, rhythm)
         output_path = str(OUTPUT_DIR / output_filename)
 
         input_data = {
@@ -339,33 +387,47 @@ if st.button("Generate MIDI", use_container_width=True):
             result = generate_midi(input_data, output_path=output_path)
 
         if result:
-            st.markdown(
-                f'<div class="success-msg">'
-                f'{len(chords)} chords &middot; {bpm} BPM &middot; {rhythm.replace("_", " ").title()} &middot; {swing}% swing'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
+            st.session_state["last_generated"] = output_path
+            st.session_state["last_filename"] = output_filename
 
-            # Read the file for download
+# ── Output Section (persistent after generate) ──
+if "last_generated" in st.session_state:
+    output_path = st.session_state["last_generated"]
+    output_filename = st.session_state["last_filename"]
+
+    if Path(output_path).exists():
+        st.markdown(
+            f'<div class="success-msg">{output_filename}</div>',
+            unsafe_allow_html=True,
+        )
+
+        # Primary action: open folder for drag-and-drop
+        abs_folder = str(OUTPUT_DIR.resolve())
+
+        col_open, col_dl = st.columns([3, 2])
+
+        with col_open:
+            if st.button("Open in Explorer", use_container_width=True,
+                         key="open_folder"):
+                # Open and select the file in Windows Explorer
+                abs_file = str(Path(output_path).resolve())
+                subprocess.Popen(["explorer", "/select,", abs_file])
+
+        with col_dl:
             with open(output_path, "rb") as f:
                 midi_bytes = f.read()
-
             st.download_button(
-                label="Download .MID",
+                label="Download",
                 data=midi_bytes,
                 file_name=output_filename,
                 mime="audio/midi",
                 use_container_width=True,
             )
 
-            # Show file path for DAW drag-and-drop
-            abs_path = str(Path(output_path).resolve())
-            st.markdown(
-                f'<div class="file-path">Saved to: {abs_path}</div>',
-                unsafe_allow_html=True,
-            )
-            st.caption("Add the midi_output folder to Ableton's Places sidebar for instant drag-and-drop.")
-        else:
-            st.error("Generation failed — check your chords.")
+        st.markdown(
+            f'<div class="file-path">{abs_folder}</div>',
+            unsafe_allow_html=True,
+        )
+        st.caption("Add this folder to Ableton's Places sidebar — drag .mid files straight onto tracks.")
 
 st.markdown('</div>', unsafe_allow_html=True)
